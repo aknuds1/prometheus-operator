@@ -50,7 +50,7 @@ const (
 	resyncPeriod = 5 * time.Minute
 )
 
-// Operator manages lify cycle of Prometheus deployments and
+// Operator manages life cycle of Prometheus deployments and
 // monitoring configurations.
 type Operator struct {
 	kclient   kubernetes.Interface
@@ -706,11 +706,11 @@ func (c *Operator) sync(key string) error {
 	}
 
 	if !exists {
-		sset, err := makeStatefulSet(*p, nil, &c.config, ruleFileConfigMaps)
-		if err != nil {
+		sset, e := makeStatefulSet(*p, nil, &c.config, ruleFileConfigMaps)
+		if e != nil {
 			return errors.Wrap(err, "creating statefulset failed")
 		}
-		if _, err := ssetClient.Create(sset); err != nil {
+		if _, e := ssetClient.Create(sset); e != nil {
 			return errors.Wrap(err, "creating statefulset failed")
 		}
 		return nil
@@ -719,7 +719,7 @@ func (c *Operator) sync(key string) error {
 	if err != nil {
 		return errors.Wrap(err, "updating statefulset failed")
 	}
-	if _, err := ssetClient.Update(sset); err != nil {
+	if _, e := ssetClient.Update(sset); e != nil {
 		return errors.Wrap(err, "updating statefulset failed")
 	}
 
@@ -754,18 +754,18 @@ func ListOptions(name string) metav1.ListOptions {
 }
 
 // PrometheusStatus evaluates the current status of a Prometheus deployment with respect
-// to its specified resource object. It return the status and a list of pods that
+// to its specified resource object. It returns the status and a list of pods that
 // are not updated.
 func PrometheusStatus(kclient kubernetes.Interface, p *monitoringv1.Prometheus) (*monitoringv1.PrometheusStatus, []v1.Pod, error) {
 	res := &monitoringv1.PrometheusStatus{Paused: p.Spec.Paused}
 
 	pods, err := kclient.Core().Pods(p.Namespace).List(ListOptions(p.Name))
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "retrieving pods of failed")
+		return nil, nil, errors.Wrap(err, "retrieving pods failed")
 	}
 	sset, err := kclient.AppsV1beta1().StatefulSets(p.Namespace).Get(statefulSetNameFromPrometheusName(p.Name), metav1.GetOptions{})
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "retrieving stateful set failed")
+		return nil, nil, errors.Wrap(err, "retrieving StatefulSet failed")
 	}
 
 	res.Replicas = int32(len(pods.Items))
@@ -825,7 +825,7 @@ func (c *Operator) destroyPrometheus(key string) error {
 	// Update the replica count to 0 and wait for all pods to be deleted.
 	ssetClient := c.kclient.AppsV1beta1().StatefulSets(sset.Namespace)
 
-	if _, err := ssetClient.Update(sset); err != nil {
+	if _, e := ssetClient.Update(sset); e != nil {
 		return errors.Wrap(err, "updating statefulset for scale-down failed")
 	}
 
@@ -834,8 +834,8 @@ func (c *Operator) destroyPrometheus(key string) error {
 	// TODO(fabxc): temprorary solution until StatefulSet status provides necessary info to know
 	// whether scale-down completed.
 	for {
-		pods, err := podClient.List(ListOptions(prometheusNameFromStatefulSetName(sset.Name)))
-		if err != nil {
+		pods, e := podClient.List(ListOptions(prometheusNameFromStatefulSetName(sset.Name)))
+		if e != nil {
 			return errors.Wrap(err, "retrieving pods of statefulset failed")
 		}
 		if len(pods.Items) == 0 {
@@ -845,11 +845,11 @@ func (c *Operator) destroyPrometheus(key string) error {
 	}
 
 	// StatefulSet scaled down, we can delete it.
-	if err := ssetClient.Delete(sset.Name, nil); err != nil {
+	if e := ssetClient.Delete(sset.Name, nil); e != nil {
 		return errors.Wrap(err, "deleting statefulset failed")
 	}
 
-	// Delete the auto-generate configuration.
+	// Delete the auto-generated configuration.
 	// TODO(fabxc): add an ownerRef at creation so we don't delete Secrets
 	// manually created for Prometheus servers with no ServiceMonitor selectors.
 	s := c.kclient.Core().Secrets(sset.Namespace)
@@ -892,7 +892,7 @@ func (c *Operator) loadBasicAuthSecrets(mons map[string]*monitoringv1.ServiceMon
 						if u, ok := secret.Data[ep.BasicAuth.Username.Key]; ok {
 							username = string(u)
 						} else {
-							return nil, fmt.Errorf("Secret password of servicemonitor %s not found.", mon.Name)
+							return nil, fmt.Errorf("secret password of servicemonitor %s not found", mon.Name)
 						}
 
 					}
@@ -902,7 +902,7 @@ func (c *Operator) loadBasicAuthSecrets(mons map[string]*monitoringv1.ServiceMon
 						if p, ok := secret.Data[ep.BasicAuth.Password.Key]; ok {
 							password = string(p)
 						} else {
-							return nil, fmt.Errorf("Secret username of servicemonitor %s not found.",
+							return nil, fmt.Errorf("secret username of servicemonitor %s not found",
 								mon.Name)
 						}
 
@@ -910,16 +910,14 @@ func (c *Operator) loadBasicAuthSecrets(mons map[string]*monitoringv1.ServiceMon
 				}
 
 				if username == "" && password == "" {
-					return nil, fmt.Errorf("Could not generate basicAuth for servicemonitor %s. Username and password are empty.",
+					return nil, fmt.Errorf("could not generate basicAuth for servicemonitor %s. Username and password are empty",
 						mon.Name)
-				} else {
-					secrets[fmt.Sprintf("%s/%s/%d", mon.Namespace, mon.Name, i)] =
-						BasicAuthCredentials{
-							username: username,
-							password: password,
-						}
 				}
-
+				secrets[fmt.Sprintf("%s/%s/%d", mon.Namespace, mon.Name, i)] =
+					BasicAuthCredentials{
+						username: username,
+						password: password,
+					}
 			}
 		}
 	}
@@ -978,9 +976,8 @@ func (c *Operator) createConfig(p *monitoringv1.Prometheus, ruleFileConfigMaps [
 		if bytes.Equal(curConfig, generatedConf) && bytes.Equal(curConfigMaps, generatedConfigMaps) {
 			c.logger.Log("msg", "updating config skipped, no configuration change")
 			return nil
-		} else {
-			c.logger.Log("msg", "current config or current configmaps has changed")
 		}
+		c.logger.Log("msg", "current config or current configmaps has changed")
 	} else {
 		c.logger.Log("msg", "no current config or current configmaps found", "currentConfigFound", curConfigFound, "currentConfigMapsFound", curConfigMapsFound)
 	}
